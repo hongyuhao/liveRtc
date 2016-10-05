@@ -4,18 +4,53 @@
 <head>
 
   <title>Realtime communication with WebRTC</title>
-
-  <link rel="stylesheet" href="/css/main.css" />
+  <meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+  <link rel="stylesheet" href="css/main.css" />
 
 </head>
 
 <body>
 
   <h1>Live for hyh</h1>
+  <div class="wrapper">
+    <div id="videos" class="main">
+      <div class="main-inner">
+        <div class="item">
+          <video id="localVideo" autoplay muted></video>
+        </div>
+        <div class="item">
+          <video src=""></video>
+        </div>
+        <div class="item">
+          <video src=""></video>
+        </div>
+        <div class="item">
+          <video src=""></video>
+        </div>
+        <div class="item">
+          <video src=""></video>
+        </div>
 
-  <div id="videos">
-    <video id="localVideo" autoplay muted></video>
-    <video id="remoteVideo" autoplay></video>
+      </div>
+    </div>
+    <div class="sidebar">
+        <ul class="talk-list">
+          <li><span class="name">haha: </span><span class="txt">hhhhhhhhhhhh</span></li>
+          <li><span class="name">haha: </span><span class="txt">hhhhhhhhhhhh</span></li>
+          <li><span class="name">haha: </span><span class="txt">hhhhhhhhhhhh</span></li>
+          <li><span class="name">haha: </span><span class="txt">hhhhhhhhhhhh</span></li>
+          <li><span class="name">haha: </span><span class="txt">hhhhhhhhhhhh</span></li>
+          <li><span class="name">haha: </span><span class="txt">hhhhhhhhhhhh</span></li>
+          <li><span class="name">haha: </span><span class="txt">hhhhhhhhhhhh</span></li>
+          <li><span class="name">haha: </span><span class="txt">hhhhhhhhhhhh</span></li>
+          <li><span class="name">haha: </span><span class="txt">hhhhhhhhhhhh</span></li>
+          <li><span class="name">haha: </span><span class="txt">hhhhhhhhhhhh</span></li>
+        </ul>
+        <div class="send-bar">
+          <input type="text" class="text">
+          <span class="btn">发送</span>
+        </div>
+    </div>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
