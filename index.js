@@ -5,25 +5,25 @@ var nodeStatic = require('node-static');
 var http = require('http');
 var socketIO = require('socket.io');
 
-// var fileServer = new(nodeStatic.Server)();
-// var app = http.createServer(function(req, res) {
-//   fileServer.serve(req, res);
-// }).listen(8080);
+var fileServer = new(nodeStatic.Server)();
+var app = http.createServer(function(req, res) {
+  fileServer.serve(req, res);
+}).listen(8080);
 
- var https = require('https');
- var server = https.createServer({
-    key: fs.readFileSync("/var/data/sslKey/webrtc_yuhao_pub.key"),
-    cert: fs.readFileSync("/var/data/sslKey/webrtc_yuhao_pub.crt"),
-    requestCert: true,
-    rejectUnauthorized: false
- },app);
- server.listen(8080);
- var wss = new ws.Server({
-   server: server,
-   path: '/'
- });
+ // var https = require('https');
+ // var server = https.createServer({
+ //    key: fs.readFileSync("/var/data/sslKey/webrtc_yuhao_pub.key"),
+ //    cert: fs.readFileSync("/var/data/sslKey/webrtc_yuhao_pub.crt"),
+ //    requestCert: true,
+ //    rejectUnauthorized: false
+ // },app);
+ // server.listen(8080);
+ // var wss = new ws.Server({
+ //   server: server,
+ //   path: '/'
+ // });
 
-var io = socketIO.listen(server);
+var io = socketIO.listen(app);
 io.sockets.on('connection', function(socket) {
 
   // convenience function to log server messages on the client
@@ -59,9 +59,9 @@ io.sockets.on('connection', function(socket) {
       log('Client ID ' + socket.id + ' created room ' + room);
       socket.emit('created', room, socket.id);
 
-    } else if (numClients === 1) {
+    } else if (numClients <= 2) {
       log('Client ID ' + socket.id + ' joined room ' + room);
-      io.sockets.in(room).emit('join', room);
+      io.sockets.in(room).emit('join', room, socket.id);
       socket.join(room);
       socket.emit('joined', room, socket.id);
       io.sockets.in(room).emit('ready', room);

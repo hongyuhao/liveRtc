@@ -8,6 +8,7 @@ var pc;
 var remoteStream;
 var turnReady;
 var firstFlag = false;
+var mySocketId;
 
 var pcConfig = {
   'iceServers': [{
@@ -22,6 +23,8 @@ var sdpConstraints = {
     'OfferToReceiveVideo': true
   }
 };
+
+var pcPool = new Map();
 
 // navigator.getUserMedia = navigator.getUserMedia ||
 //                          navigator.webkitGetUserMedia ||
@@ -40,10 +43,12 @@ if (room !== '') {
   console.log('Attempted to create or  join room', room);
 }
 
-socket.on('created', function(room) {
+socket.on('created', function(room, serverSocketId) {
   console.log('Created room ' + room);
   isInitiator = true;
   firstFlag = true;
+  mySocketId = serverSocketId;
+  console.log('after Create Room mySocketId=' + mySocketId);
   createLocalStream();
 });
 
@@ -51,17 +56,23 @@ socket.on('full', function(room) {
   console.log('Room ' + room + ' is full');
 });
 
-socket.on('join', function (room){
+socket.on('join', function (room, socketId){
+  console.log('join socketId:' + socketId);
   console.log('Another peer made a request to join room ' + room);
-  console.log('This peer is the initiator of room ' + room + '!');
+
   isChannelReady = true;
-  maybeStart();
+  // maybeStart();
+  if(firstFlag) {
+    startPeerConnect(socketId);
+  }
 });
 
-socket.on('joined', function(room) {
+socket.on('joined', function(room, serverSocketId) {
   console.log('joined: ' + room);
   isChannelReady = true;
-  maybeStart();
+  mySocketId = serverSocketId;
+  console.log('after join Room mySocketId=' + mySocketId);
+  // maybeStart();
 });
 
 socket.on('ready', function(room) {
@@ -75,36 +86,65 @@ socket.on('log', function(array) {
 
 
 ////////////////////////////////////////////////
-
-function sendMessage(message) {
-  console.log('Client sending message: ', message);
-  socket.emit('message', message);
+function sendMessage(message, type, toSocketId) {
+  if(!toSocketId) {
+    toSocketId = 0;
+  }
+  var messageObj = {'type':type, 'entity': message , 'socketId':mySocketId, 'toSocketId':toSocketId};
+  socket.emit('message', messageObj);
 }
 
 // This client receives a message
 socket.on('message', function(message) {
   console.log('Client received message:', message);
-  if (message === 'got user media') {
-    maybeStart();
-  } else if (message.type === 'offer') {
-    if (!isInitiator && !isStarted) {
-      maybeStart();
-    }
-
-    pc.setRemoteDescription(new RTCSessionDescription(message));
-    doAnswer();
-  } else if (message.type === 'answer' && isStarted) {
-    pc.setRemoteDescription(new RTCSessionDescription(message));
-  } else if (message.type === 'candidate' && isStarted) {
-    var candidate = new RTCIceCandidate({
-      sdpMLineIndex: message.label,
-      candidate: message.candidate
-    });
-    pc.addIceCandidate(candidate);
-  } else if (message === 'bye' && isStarted) {
-    handleRemoteHangup();
+  console.error("message from " + message.socketId);
+  
+  var messageSocketId = message.socketId;
+  var targetSocketId = message.toSocketId;
+  if(targetSocketId !== 0 && targetSocketId !== mySocketId) {
+      console.log('message:', message, 'not for me:', mySocketId);
+      return;
   }
+
+  if (message === 'got user media') {
+    // maybeStart();
+
+  } else if (message.type === 'offer') {
+    
+    startPeerConnect(messageSocketId);
+    console.log(pcPool.get(messageSocketId));
+    var socketPc = pcPool.get(messageSocketId);
+console.log("receive offer from peer");
+console.log("socketId=", messageSocketId, "socketPc:", socketPc); 
+    console.log(message.entity);
+    socketPc.setRemoteDescription(message.entity);
+    doAnswer(socketPc, messageSocketId);
+
+  } else if (message.type === 'answer') {
+
+    var socketPc = pcPool.get(messageSocketId);
+    console.log("receive answer from " + messageSocketId);
+    console.log(message.entity);
+    console.log("set remote desctiption");
+    console.log("socketId=", message.socketId, "socketPc:", socketPc);
+    socketPc.setRemoteDescription(message.entity);
+
+  } else if (message.type === 'candidate') {
+    var candidate = new RTCIceCandidate({
+      sdpMLineIndex: message.entity.label,
+      candidate: message.entity.candidate
+    });
+    var socketPc = pcPool.get(message.socketId);
+    socketPc.addIceCandidate(candidate);
+  } else if (message.type === 'text' && message.entity === 'bye') {
+    handleRemoteHangup(message.socketId);
+  } 
 });
+
+function replyOfferDescription(sessionDescription, socketId) {
+  var replyMsg = {'type':'replysdp', 'sdp': sessionDescription , 'socketId':socketId};
+  sendMessage(replyMsg);
+}
 
 ////////////////////////////////////////////////////
 
@@ -154,88 +194,80 @@ if (location.hostname !== 'localhost') {
   );
 }
 
-function maybeStart() {
-  console.log('>>>>>>> maybeStart() ', isStarted, localStream, isChannelReady);
-  if (!isStarted && isChannelReady) {
-    console.log('>>>>>> creating peer connection');
-    createPeerConnection();
-
-    if(typeof localStream !== 'undefined') {
-      console.log('add local stream to peer');
-      pc.addStream(localStream);
-    }
-
-    isStarted = true;
-    console.log('isInitiator', isInitiator);
-    if (isInitiator) {
-      doCall();
-    }
+function startPeerConnect(socketId) {
+  console.log('createConnect with socket:' + socketId);
+  if(pcPool.get(socketId)) {
+    console.log("connection exist");
   }
+  var socketPc = new RTCPeerConnection(null);
+  socketPc.onicecandidate = handleIceCandidate;
+  socketPc.ontrack = handleRemoteStreamAdded;
+  socketPc.onremovestream = handleRemoteStreamRemoved;
+  console.error('Created RTCPeerConnnection: ' + socketId);
+
+  if(typeof localStream !== 'undefined') {
+    socketPc.addStream(localStream);
+  }
+
+  // add peerconnection to user
+  pcPool.set(socketId,socketPc);
+
+  if(firstFlag) {
+     socketPc.createOffer(function(offer) {
+
+      // Set Opus as the preferred codec in SDP if Opus is present.
+      //  sessionDescription.sdp = preferOpus(sessionDescription.sdp);
+      socketPc.setLocalDescription(offer);
+      console.log('setLocalAndSendMessage sending message', offer);
+      sendMessage(offer, 'offer', socketId);
+
+    }, handleCreateOfferError);
+  }
+ 
+
 }
+
 
 window.onbeforeunload = function() {
-  sendMessage('bye');
+  sendMessage( 'bye', 'text');
 };
 
-/////////////////////////////////////////////////////////
-
-function createPeerConnection() {
-  try {
-    pc = new RTCPeerConnection(null);
-    pc.onicecandidate = handleIceCandidate;
-    pc.ontrack = handleRemoteStreamAdded;
-    pc.onremovestream = handleRemoteStreamRemoved;
-    console.log('Created RTCPeerConnnection');
-  } catch (e) {
-    console.log('Failed to create PeerConnection, exception: ' + e.message);
-    alert('Cannot create RTCPeerConnection object.');
-    return;
-  }
-}
 
 function handleIceCandidate(event) {
   console.log('icecandidate event: ', event);
   if (event.candidate) {
-    sendMessage({
+    var candidate = {
       type: 'candidate',
       label: event.candidate.sdpMLineIndex,
       id: event.candidate.sdpMid,
       candidate: event.candidate.candidate
-    });
+    };
+    sendMessage(candidate, 'candidate');
   } else {
     console.log('End of candidates.');
   }
 }
 
-// function handleRemoteStreamAdded(event) {
-//   console.log('Remote stream added.');
-//   remoteVideo.src = window.URL.createObjectURL(event.stream);
-//   remoteStream = event.stream;
-// }
 
 function handleCreateOfferError(event) {
   console.log('createOffer() error: ', event);
 }
 
-function doCall() {
-  console.log('Sending offer to peer');
-  pc.createOffer(setLocalAndSendMessage, handleCreateOfferError);
-}
 
-function doAnswer() {
+//send answer description to offer socketId
+function doAnswer(socketPc, toSocketId) {
   console.log('Sending answer to peer.');
-  pc.createAnswer().then(
-    setLocalAndSendMessage,
+  socketPc.createAnswer().then( function(answer) {
+    socketPc.setLocalDescription(answer);
+    sendMessage(answer, 'answer', toSocketId);
+  },
     onCreateSessionDescriptionError
   );
 }
 
-function setLocalAndSendMessage(sessionDescription) {
-  // Set Opus as the preferred codec in SDP if Opus is present.
-  //  sessionDescription.sdp = preferOpus(sessionDescription.sdp);
-  pc.setLocalDescription(sessionDescription);
-  console.log('setLocalAndSendMessage sending message', sessionDescription);
-  sendMessage(sessionDescription);
+//after reply description
+function handleLocalDescription(sessionDescription, socketId) {
+  pcPool.get(socketId).setLocalDescription(sessionDescription);
 }
 
 function onCreateSessionDescriptionError(error) {
@@ -284,21 +316,28 @@ function handleRemoteStreamRemoved(event) {
 function hangup() {
   console.log('Hanging up.');
   stop();
-  sendMessage('bye');
+  sendMessage('bye', 'text');
 }
 
-function handleRemoteHangup() {
+function handleRemoteHangup(socketId) {
   console.log('Session terminated.');
-  stop();
+  stop(socketId);
   isInitiator = false;
 }
 
-function stop() {
+function stop(socketId) {
   isStarted = false;
   // isAudioMuted = false;
   // isVideoMuted = false;
-  pc.close();
-  pc = null;
+  if(!socketId) {
+    //clear all pc
+    console.log('need to clear all peerConnection');
+  }
+  if(socketId && pcPool.get(socketId)) {
+    pcPool.get(socketId).close();
+    pcPool.get(socketId) = null;  
+  } 
+  
 }
 
 ///////////////////////////////////////////
